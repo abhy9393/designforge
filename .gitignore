@@ -1,0 +1,23 @@
+node_modules
+frontend/dist
+backend/dist
+.env
+backend/.env
+frontend/.env
+coverage
+.DS_Store
+# Environment secrets
+.env.*
+!.env.example
+**/.env.*
+!**/.env.example
+
+# Logs
+*.log
+npm-debug.log*
+
+# Coverage and build output
+coverage/
+**/coverage/
+build/
+**/build/
