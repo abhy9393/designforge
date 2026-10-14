@@ -54,7 +54,17 @@ attemptRouter.patch('/:id/draft', requireAuth, async (req: AuthenticatedRequest,
   try {
     const parsed = draftAttemptSchema.safeParse(req.body);
     if (!parsed.success) {
-      return res.status(400).json({ message: parsed.error.issues[0]?.message || 'Draft data is invalid.' });
+      const firstIssue = parsed.error.issues[0];
+      const field = firstIssue ? formatFieldPath(firstIssue.path) : '';
+      return res.status(400).json({
+        message: firstIssue
+          ? `${field}: ${firstIssue.message}`
+          : 'Draft data is invalid.',
+        errors: parsed.error.issues.map((issue) => ({
+          field: formatFieldPath(issue.path),
+          message: issue.message,
+        })),
+      });
     }
     const attempt = await updateDraft(req.user!.id, String(req.params.id), parsed.data);
     return res.json({ attempt });

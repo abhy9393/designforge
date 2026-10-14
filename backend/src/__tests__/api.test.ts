@@ -152,6 +152,138 @@ describe('DesignForge API', () => {
     expect(submitResponse.body.attempt.status).toBe('evaluated');
   });
 
+  it('rejects empty and incomplete draft saves without changing the draft, and accepts a valid design', async () => {
+    const agent = request.agent(app);
+    const csrfToken = await register(agent, 'Draft Validation User', 'draft-validation@example.com');
+    const draftId = await createParkingAttempt(agent, csrfToken);
+    const emptyDesignResponse = await agent
+      .patch(`/api/attempts/${draftId}/draft`)
+      .set('X-CSRF-Token', csrfToken)
+      .send({ design: { classes: [], interfaces: [], relationships: [], notes: [] } });
+    expect(emptyDesignResponse.status).toBe(400);
+    expect(emptyDesignResponse.body.message).toContain('At least one class is required');
+
+    const emptyFieldsResponse = await agent
+      .patch(`/api/attempts/${draftId}/draft`)
+      .set('X-CSRF-Token', csrfToken)
+      .send({
+        design: {
+          classes: [{
+            id: 'lot',
+            name: '  ',
+            responsibilities: [''],
+            attributes: [{ name: '', type: '' }],
+            methods: [{ name: '', returnType: '', params: [{ name: '', type: '' }] }],
+          }],
+          interfaces: [],
+          relationships: [{ id: 'rel', source: '', target: '', type: 'associates' }],
+          notes: [''],
+        },
+      });
+    expect(emptyFieldsResponse.status).toBe(400);
+    expect(emptyFieldsResponse.body.message).toContain('design.classes[0].name');
+
+    const missingRequiredFieldResponse = await agent
+      .patch(`/api/attempts/${draftId}/draft`)
+      .set('X-CSRF-Token', csrfToken)
+      .send({
+        design: {
+          classes: [{
+            id: 'lot',
+            name: 'ParkingLot',
+            responsibilities: [],
+            attributes: [{ name: 'capacity', type: '  ' }],
+            methods: [],
+          }],
+          interfaces: [],
+          relationships: [],
+          notes: [],
+        },
+      });
+    expect(missingRequiredFieldResponse.status).toBe(400);
+    expect(missingRequiredFieldResponse.body.message).toContain('design.classes[0].attributes[0].type');
+
+    const unchangedDraft = await agent.get(`/api/attempts/${draftId}`);
+    expect(unchangedDraft.body.attempt.designSubmission.classes).toEqual([]);
+
+    const validDesign = {
+      classes: [{
+        id: 'lot',
+        name: 'ParkingLot',
+        responsibilities: [''],
+        attributes: [{ name: '', type: '' }],
+        methods: [{ name: '', returnType: '', params: [{ name: '', type: '' }] }],
+      }],
+      interfaces: [],
+      relationships: [{ id: 'rel', source: '', target: '', type: 'associates' }],
+      notes: [''],
+    };
+    const validDraftResponse = await agent
+      .patch(`/api/attempts/${draftId}/draft`)
+      .set('X-CSRF-Token', csrfToken)
+      .send({ design: validDesign });
+    expect(validDraftResponse.status).toBe(200);
+    expect(validDraftResponse.body.attempt.designSubmission).toEqual(validDesign);
+  });
+
+  it("shows only the authenticated user's submitted attempts and completed evaluations on the dashboard", async () => {
+    const design = {
+      classes: [{
+        id: 'lot',
+        name: 'ParkingLot',
+        responsibilities: ['Manage parking'],
+        attributes: [{ name: 'capacity', type: 'number' }],
+        methods: [{ name: 'assign', returnType: 'void', params: [] }],
+      }],
+      interfaces: [],
+      relationships: [],
+      notes: [],
+    };
+    const owner = request.agent(app);
+    const ownerCsrf = await register(owner, 'Dashboard Owner', 'dashboard-owner@example.com');
+    const savedDraftId = await createParkingAttempt(owner, ownerCsrf);
+    await owner
+      .patch(`/api/attempts/${savedDraftId}/draft`)
+      .set('X-CSRF-Token', ownerCsrf)
+      .send({ design });
+    const ownerSubmission = await owner
+      .post(`/api/attempts/${savedDraftId}/submit`)
+      .set('X-CSRF-Token', ownerCsrf)
+      .send({ design });
+    expect(ownerSubmission.status).toBe(201);
+
+    const otherUser = request.agent(app);
+    const otherCsrf = await register(otherUser, 'Other Dashboard User', 'other-dashboard@example.com');
+    const otherDraftId = await createParkingAttempt(otherUser, otherCsrf);
+    const otherSubmission = await otherUser
+      .post(`/api/attempts/${otherDraftId}/submit`)
+      .set('X-CSRF-Token', otherCsrf)
+      .send({ design: { ...design, notes: ["Another user's design."] } });
+    expect(otherSubmission.status).toBe(201);
+
+    const stats = await owner.get('/api/dashboard/stats');
+    expect(stats.status).toBe(200);
+    expect(stats.body).toMatchObject({ totalAttempts: 1, completedEvaluations: 1 });
+    expect(stats.body.recentActivity).toEqual([
+      expect.objectContaining({
+        id: ownerSubmission.body.attempt.id,
+        problemId: ownerSubmission.body.attempt.problemId,
+        status: 'evaluated',
+      }),
+    ]);
+
+    const recentActivity = await owner.get('/api/dashboard/recent-activity');
+    expect(recentActivity.status).toBe(200);
+    expect(recentActivity.body.activity).toHaveLength(1);
+    expect(recentActivity.body.activity[0]).toMatchObject({
+      id: ownerSubmission.body.attempt.id,
+      status: 'evaluated',
+      attemptNumber: 1,
+    });
+    expect(recentActivity.body.activity.map((entry: any) => entry.id)).not.toContain(otherSubmission.body.attempt.id);
+    expect(recentActivity.body.activity.map((entry: any) => entry.id)).not.toContain(savedDraftId);
+  });
+
   it('retrieves the exact saved draft design by its attempt ID without creating another attempt', async () => {
     const agent = request.agent(app);
     const csrfToken = await register(agent, 'Katherine Johnson', 'katherine@example.com');
@@ -169,17 +301,16 @@ describe('DesignForge API', () => {
           id: 'spot',
           name: 'ParkingSpot',
           responsibilities: ['Track occupancy'],
-          attributes: [{ name: 'number', type: 'string' }, { name: '', type: '' }],
+          attributes: [{ name: 'number', type: 'string' }],
           methods: [
             { name: 'occupy', returnType: 'void', params: [{ name: 'vehicleId', type: 'string' }] },
-            { name: '', returnType: '', params: [{ name: '', type: '' }] },
           ],
         },
       ],
       interfaces: [],
       relationships: [
         { id: 'lot-spot', source: 'ParkingLot', target: 'ParkingSpot', type: 'composes' },
-        { id: 'lot-entry', source: '', target: 'ParkingSpot', type: 'associates' },
+        { id: 'lot-entry', source: 'ParkingLot', target: 'ParkingSpot', type: 'associates' },
       ],
       notes: ['A spot belongs to exactly one lot.'],
     };
@@ -534,6 +665,13 @@ describe('DesignForge API', () => {
     const agent = request.agent(app);
     const csrfToken = await register(agent, 'Nina Simone', 'nina@example.com');
     const draftId = await createParkingAttempt(agent, csrfToken);
+    const emptyDesignResponse = await agent
+      .post(`/api/attempts/${draftId}/submit`)
+      .set('X-CSRF-Token', csrfToken)
+      .send({ design: { classes: [], interfaces: [], relationships: [], notes: [] } });
+    expect(emptyDesignResponse.status).toBe(400);
+    expect(emptyDesignResponse.body.message).toContain('At least one class is required');
+
     const invalidNameResponse = await agent
       .post(`/api/attempts/${draftId}/submit`)
       .set('X-CSRF-Token', csrfToken)
@@ -556,6 +694,7 @@ describe('DesignForge API', () => {
     expect(invalidNameResponse.body.message).toContain('design.classes[0].name');
     const nameError = invalidNameResponse.body.errors.find((issue: any) => issue.field === 'design.classes[0].name');
     expect(nameError?.message).toBeTruthy();
+    expect((await agent.get('/api/attempts')).body.attempts).toHaveLength(1);
 
     const invalidResponsibilityResponse = await agent
       .post(`/api/attempts/${draftId}/submit`)

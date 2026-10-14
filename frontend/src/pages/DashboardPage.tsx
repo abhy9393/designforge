@@ -4,10 +4,18 @@ import { ArrowRight, ChartColumn, FileClock, LibraryBig, Sparkles } from 'lucide
 import { useAuth } from '../contexts/AuthContext';
 import { api } from '../lib/api';
 
+type DashboardActivity = {
+  id: string;
+  problemId: string;
+  status: string;
+  updatedAt: string;
+  attemptNumber: number;
+};
+
 export default function DashboardPage() {
   const { user } = useAuth();
   const [stats, setStats] = useState<{ totalAttempts: number; completedEvaluations: number } | null>(null);
-  const [activity, setActivity] = useState<any[]>([]);
+  const [activity, setActivity] = useState<DashboardActivity[]>([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {

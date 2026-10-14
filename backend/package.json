@@ -7,7 +7,7 @@
     "dev": "tsx watch src/index.ts",
     "build": "tsc -p tsconfig.json",
     "start": "node dist/index.js",
-    "test": "vitest run src/__tests__/api.test.ts src/__tests__/evaluationService.test.ts src/__tests__/evaluationPersistence.test.ts src/__tests__/mongoTestSafety.test.ts",
+    "test": "vitest run src/__tests__/api.test.ts src/__tests__/dashboard.mongo.test.ts src/__tests__/evaluationService.test.ts src/__tests__/evaluationPersistence.test.ts src/__tests__/mongoTestSafety.test.ts",
     "test:mongo": "vitest run src/__tests__/submissionConcurrency.mongo.test.ts",
     "seed": "tsx src/seed/index.ts"
   },

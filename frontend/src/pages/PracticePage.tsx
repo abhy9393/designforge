@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { Plus, Save, Send, Trash2 } from 'lucide-react';
 import { api } from '../lib/api';
+import { getSubmissionValidationMessage, validateDraftDesign } from '../lib/designValidation';
 import { acquireSubmissionLock } from '../lib/submissionLock';
 
 const emptyClass = () => ({
@@ -110,6 +111,11 @@ export default function PracticePage() {
     if (!id || !attempt || attempt.status !== 'draft') return;
     setMessage('');
     setError('');
+    const validationError = validateDraftDesign(design);
+    if (validationError) {
+      setError(validationError);
+      return;
+    }
     try {
       const { data } = await api.patch(`/attempts/${id}/draft`, { design });
       setAttempt(data.attempt);
@@ -120,10 +126,16 @@ export default function PracticePage() {
   };
 
   const submitAttempt = async () => {
-    if (!id || !attempt || attempt.status !== 'draft' || !acquireSubmissionLock(submitInFlight)) return;
-    setSubmitting(true);
+    if (!id || !attempt || attempt.status !== 'draft') return;
     setError('');
     setMessage('');
+    const validationError = validateDraftDesign(design);
+    if (validationError) {
+      setError(validationError);
+      return;
+    }
+    if (!acquireSubmissionLock(submitInFlight)) return;
+    setSubmitting(true);
     try {
       const payload = { design };
       const { data } = await api.post(`/attempts/${id}/submit`, payload);
@@ -133,7 +145,12 @@ export default function PracticePage() {
       }
       navigate(`/attempts/${submissionId}/report`, { replace: true });
     } catch (err: any) {
-      setError(err.response?.data?.message || err.message || 'Submission could not be validated.');
+      setError(
+        getSubmissionValidationMessage(err)
+        || err.response?.data?.message
+        || err.message
+        || 'Submission could not be validated.',
+      );
     } finally {
       submitInFlight.current = false;
       setSubmitting(false);
